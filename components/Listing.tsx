@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useFilter } from "../context/ContextProvider";
 import ProductFrame from "./ProductFrame";
 import axios from "axios";
+import { useQuery } from "@tanstack/react-query";
 
 export interface ProductData {
   id: number;
@@ -18,38 +19,42 @@ export interface ProductData {
 }
 [];
 
-interface ProductDataQuery {
-  products: ProductData[];
-  total: number[];
-  skip: number[];
-  limit: number[];
-}
-
 const Listing = () => {
   const { brand, category } = useFilter();
-  const [fetchedData, setFetchedData] = useState<ProductDataQuery>(
-    {} as ProductDataQuery
+  const [loadedItems, setLoadedItems] = useState<ProductData[]>(
+    [] as ProductData[]
   );
+  const [currentPage, setCurrentPage] = useState<number>(1);
   const [filteredProducts, setFilteredProducts] = useState<ProductData[]>(
-    {} as ProductData[]
+    [] as ProductData[]
   );
-  const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  useEffect(() => {
+  const loadMoreItems = (): Promise<ProductData[]> =>
     axios
-      .get<ProductDataQuery>("http://localhost:3004/data")
-      .then((response) => {
-        setFetchedData(response.data);
-        setFilteredProducts(response.data.products);
+      .get("http://localhost:3004/products", {
+        params: { _page: currentPage, _limit: 5 },
       })
-      .then(() => setIsLoading(false))
-      .catch((error) => console.log(error));
-  }, []);
+      .then((response) => response.data);
+
+  const amountOfProducts = (): Promise<number[]> =>
+    axios.get("http://localhost:3004/total").then((response) => response.data);
+
+  const ProductData = useQuery(["Product fetch", currentPage], loadMoreItems, { onSuccess: (data) => { setLoadedItems(prev => prev.concat(data)) }, keepPreviousData: true });
+
+  const ProductAmount = useQuery(["Product amount"], amountOfProducts);
+
+  const checker = () => {
+    console.log(filteredProducts);
+  };
+
+  const loadMoreHandler = () => {
+    setCurrentPage(prev => prev + 1);
+  }
 
   useEffect(() => {
-    if (isLoading === false) {
+    if (ProductData.isLoading === false) {
       setFilteredProducts(
-        fetchedData.products.filter((el) => {
+        loadedItems.filter((el) => {
           if (brand !== `All` && brand !== el.brand) {
             return false;
           } else if (category !== `All` && category !== el.category) {
@@ -60,34 +65,18 @@ const Listing = () => {
         })
       );
     }
-  }, [brand, category, fetchedData, isLoading]);
+  }, [brand, category, ProductData.data, ProductData.isLoading, loadedItems]);
 
-  // Since there is only 30 items in database and filtering is limited there is no point of adding load more button to reduce amount of api calls but since the tasks requires it here is the code for the pagination
-  // const [currentPage, setCurrentPage] = useState<number>(1);
-  // const loadMoreButtonHandler = () => {
-  //   setIsLoading(true);
-  //   axios
-  //     .get<ProductDataQuery>("http://localhost:3004/data", {
-  //       params: { page: { currentPage }, limit: 5 },
-  //     })
-  //     .then((response) => {
-  //       setFetchedData(response.data);
-  //       setFilteredProducts((prev) => prev.concat(response.data.products));
-  //     })
-  //     .then(() => {
-  //       setIsLoading(false);
-  //       setCurrentPage((prev) => prev + 1);
-  //     })
-  //     .catch((error) => console.log(error));
-  // };
+  if (ProductData.isLoading === true || ProductAmount.isLoading) {
+    return <div>Page is currently being loaded</div>;
+  }
 
   return (
     <div>
-      {isLoading === false
-        ? filteredProducts.map((el) => (
-            <ProductFrame frameData={el} key={el.id} />
-          ))
-        : "Page is currently being loaded"}
+      {ProductAmount.data![0] === loadedItems.length ? "" : <button onClick={loadMoreHandler}>Load more products</button>}
+      {filteredProducts.map((el) => (
+        <ProductFrame frameData={el} key={el.id} />
+      ))}
       {filteredProducts.length === 0
         ? "There is are no items that matches selected criteria"
         : ""}
